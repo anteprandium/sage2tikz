@@ -76,7 +76,7 @@ class Scene(object):
         self.viewPoint = viewPoint
         self.lightSource = lightSource
         # For white light model:
-        self.lightRescaling=linearRescale(0,1,100,0) #100=FullColor; 0=PureWhite.
+        self.lightRescaling=linearRescale(0,1,100,10) #100=FullColor; 0=PureWhite.
         # Cos=1->Angle=0->Full White Cos=0->Angle=pi/2->FullColor
         self.lightIntensity=lambda N, P: self.lightRescaling(
              bernstein([0.1,0.3, 0.5,0.8,0.9,1],abs(vm.cosine(  N,
