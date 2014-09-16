@@ -1,0 +1,379 @@
+#!/usr/bin/env sage -python
+#-*- coding: utf-8 -*-
+
+import sys
+import traceback
+from sage.all import *
+from math import sqrt, pow, fabs, copysign, exp
+from operator import attrgetter
+
+
+def linearRescale(a,b,   c,d):
+    """Return a lambda that rescales the interval [a,b] to [c,d]. The scaling is linear."""
+    c1=(d*a - b*c)/float(a - b)
+    c2=-(d - c)/float(a - b)
+    return lambda x: round(c1+c2*x)
+
+def bernstein(y, t):     # Stolen from Bill Casselmans' pyscript
+    n = len(y)-1
+    t = 1.0*t
+    s = 1-t
+    p = y[0]
+    k = 1
+    c = n*t
+    for i in range(0,n):
+        p = p*s + c*y[k]
+        c = c*(n-k)*t/(k+1)
+        k = k+1
+    return(p)
+
+class VectorMath(object):
+    """This class encapsulates the vector functions. Vectors are taken to be lists or tuples of equal length."""
+    def __init__(self):
+        pass
+    def dotProduct(self, u,v):
+        """Dot product of two vectors."""
+        return(sum([a*b for a,b in zip(u,v)]))
+    def scalarProduct(self, a, v):
+        """docstring for scalarProduct"""
+        return([a*vi for vi in v])
+    def kProduct(self, u, v):
+        """docstring for compwiseProduct"""
+        return([ui*vi for ui,vi in zip(u,v)])
+    def kSum(self, u, v):
+        return([u_i+v_i for (u_i,v_i) in zip(u,v)])
+    def crossProduct(self,   a,b):
+        """Cross product of two vectors. a and b are supposed to be of length 3"""
+        return (a[1]*b[2]-a[2]*b[1],-a[0]*b[2]+a[2]*b[0],a[0]*b[1]-a[1]*b[0])
+    def norm(self,   a):
+        """Norm of a vector"""
+        return sqrt(sum([i**2 for i in a]))
+    def cosine(self, a,b):
+        """Cosine of the angle given by two vectors"""
+        try:
+            return(self.dotProduct(a,b)/(self.norm(a)*self.norm(b)))
+        except:
+            return 0.5
+    def vector(self,   P,Q):
+        "Return vector from P to Q"
+        return([b-a for a,b in zip(P,Q)])
+    def barycenter(self, lPoints):
+        """barycenter of a list of points of equal length"""
+        return([ 1/float(len(lPoints)) * sum(a) for a in zip(*lPoints) ])
+    def midPoint(self, P,Q):
+        """Mid point of P and Q"""
+        return self.barycenter([P,Q])
+    def distance(self, P,Q):
+        return self.norm(self.vector(P,Q))
+
+vm=VectorMath()
+
+class Scene(object):
+    """Scene class encapsulates all data pertaining to transforms from raw data to canvas"""
+    def __init__(self, centerPoint, viewPoint, lightSource):
+        super(Scene, self).__init__()
+        self.centerPoint = centerPoint
+        self.viewPoint = viewPoint
+        self.lightSource = lightSource
+        # For white light model:
+        self.lightRescaling=linearRescale(0,1,100,0) #100=FullColor; 0=PureWhite.
+        # Cos=1->Angle=0->Full White Cos=0->Angle=pi/2->FullColor
+        self.lightIntensity=lambda N, P: self.lightRescaling(
+             bernstein([0.1,0.3, 0.5,0.8,0.9,1],abs(vm.cosine(  N,
+            vm.vector(P, self.lightSource)  ))))
+        # Computations for planeProjection
+        self.Displacement=[c-e for c,e in zip(self.centerPoint,self.viewPoint)]
+        #self.r1=sqrt(pow(self.Displacement[0],2)+pow(self.Displacement[1],2))
+        self.r1=float(sqrt(self.Displacement[0]*self.Displacement[0]
+                +self.Displacement[1]*self.Displacement[1]))
+        self.s1=self.Displacement[0]/self.r1 #->float
+        self.c1=self.Displacement[1]/self.r1 #->float
+        self.RotatedDisplacement=(self.c1*self.Displacement[0]-
+                self.s1*self.Displacement[1],
+            self.s1*self.Displacement[0]+self.c1*self.Displacement[1],
+            self.Displacement[2])
+        self.r2=float(sqrt(self.Displacement[0]*self.Displacement[0]
+            +self.Displacement[1]*self.Displacement[1]
+            +self.Displacement[2]*self.Displacement[2]))
+        self.c2=self.RotatedDisplacement[1]/self.r2 # ->float
+        self.s2=self.RotatedDisplacement[2]/self.r2 # ->float
+
+    def planeProjection(self, P):
+        """planeProjection takes a 3D point, and does the following:
+        1. It translates the view point to the origin
+        2. It applies two rotations, first around the z-axis, then around the x axis
+            so that the centerpoint of the view lies on the y axis.
+        It we wanted to do parallell projection, we can apply this plane projection and
+        simply drop the y coordinate.
+        """
+        return (self.c1*(P[0]-self.viewPoint[0])-self.s1*(P[1]-self.viewPoint[1]),
+            self.s1*self.c2*(P[0]-self.viewPoint[0]) +self.c1*self.c2*(P[1]-self.viewPoint[1]) +
+            self.s2*(P[2]-self.viewPoint[2]),
+        -self.s1*self.s2*(P[0]-self.viewPoint[0])-self.c1*self.s2*(P[1]-self.viewPoint[1]) +
+            self.c2*(P[2]-self.viewPoint[2]))
+
+    def canvasProjection(self, M):
+        """This converts a point, already in parallell projection, to a perspective 2d point.
+        The transformation is just dividing by the y coordinate to some power. This means, the further away from the viewpoint, the smaller. 1.2 Seems to be the right amount.
+        """
+        t=M[1]**(1.2)
+        return( ( M[0]/t, M[2]/t ) )
+        
+
+def strPoint(P):
+    """docstring for strPoint"""
+    return("(%.6f,%.6f)" % (P[0],P[1]))
+
+
+class Polygon(object):
+    """docstring for Polygon"""
+    def __init__(self, lPoints, scene):
+        #super(Polygon, self).__init__()
+        self.lPoints = lPoints
+        self.normalVector=vm.crossProduct( vm.vector(self.lPoints[0],self.lPoints[1]),
+            vm.vector(self.lPoints[0], self.lPoints[-1]) )
+        self.scene = scene # this shouldn't be here
+        # All this below belongs to a ProjectedPolygon class.
+        self.projectedPolygon=[scene.planeProjection(P) for P in self.lPoints]
+        self.canvasPolygon=[scene.canvasProjection(R) for R in self.projectedPolygon]
+        self.xmin=min([P[0] for P in self.canvasPolygon])
+        self.xmax=max([P[0] for P in self.canvasPolygon])
+        self.lightIntensity=scene.lightIntensity(self.normalVector,self.lPoints[0])
+        self.orientation=copysign(1,vm.cosine(self.normalVector,
+            vm.vector(self.lPoints[0], scene.viewPoint)))
+        self.depth=-vm.barycenter(self.projectedPolygon)[1]
+
+    def __repr__(self): # this belongs in a self.render() method
+
+        if self.orientation>0:
+            return "\\filldraw[fColor=%d] %s--cycle;" %( self.lightIntensity,
+                "--".join([strPoint(P) for P in self.canvasPolygon]) )
+        else:
+            return "\\filldraw[bColor=%d] %s--cycle;" %( self.lightIntensity,
+                "--".join([strPoint(P) for P in self.canvasPolygon]) )
+
+class Node(object):
+    """docstring for Node"""
+    def __init__(self, nodeDict, scene):
+        # super(Node, self).__init__()
+        # nodeDict={"Position": (x,y,z), "Text": "Text", "Options:" "TikZ Options"}
+        #
+        self.nodeDict = nodeDict
+        self.scene=scene
+        self.canvasPoint=self.scene.canvasProjection(self.scene.planeProjection( self.nodeDict["Position"] ))
+        self.depth=0
+    def __str__(self):
+        """docstring for __str__"""
+        return "\\node[%s] at %s {%s};" % ( self.nodeDict["Options"] if "Options" in self.nodeDict else "", strPoint(self.canvasPoint), self.nodeDict["Text"])
+
+# default echoScript
+def echoScript():
+    return ''
+
+
+def preamble(scale=10):
+    """Document Preamble"""
+    print """%!TEX TS-program = lualatex
+%% Lovingly handcrafted with texrender3d.py, a SAGE/Python script that renders
+%% polygons into a standalone+tikzpicture document.
+%%
+%% The input script was:
+""" + echoScript() + """\\documentclass[border=1pt]{standalone}
+\\nofiles
+\\usepackage[]{tikz}
+\\providecolor{Back}{RGB}{250,183,0}
+\\providecolor{Front}{RGB}{137,22,54}
+\\providecolor{Curves}{RGB}{0,148,215}
+\\providecolor{Axes}{RGB}{0,161,155}
+\\providecolor{Boxed}{RGB}{235,208,165}
+\\tikzset{setcolor/.code={\definecolor{usecolor}{rgb}{#1}}}
+\\tikzset{fColor/.style={Front!#1}}
+\\tikzset{bColor/.style={Back!#1}}
+\\tikzset{mmaBoxed/.style={draw=black!80, semithick}}
+\\tikzset{mmaAxes/.style={draw=black!80, semithick}}
+\\tikzset{mmaCurve/.style={draw=Curves,line width=.5pt}}
+\\pgfdeclarelayer{textLayer}
+\\pgfsetlayers{main,textLayer}
+\\begin{document}
+\\begin{tikzpicture}[scale=%.3f, line cap=round, line width=.1pt, line join=round, line cap=round]""" % scale
+
+def postamble():
+    """docstring for postamble"""
+    print "\\end{tikzpicture}\n\\end{document}",
+
+
+class Line(Polygon):
+    """the normal vector will fail for Line; hence lightIntensity and orientation will be rubbish. BUT: we are not using either for __repr__, so we can call it a day! """
+    def __init__(self, scene, Origin, End):
+        super(Line, self).__init__([Origin, End], scene)
+        self.Style="mmaAxes"
+    def __repr__(self):
+        """docstring for __repr__"""
+        return "\\draw[%s] %s--%s;" % (self.Style, strPoint(self.canvasPolygon[0]), strPoint(self.canvasPolygon[1]))
+
+
+
+class Arrow(Line):
+    """docstring for TikZArrow"""
+    def __init__(self, scene, Origin,End):
+        super(Arrow, self).__init__(scene, Origin,End)
+        self.Style="->,mmaAxes"
+
+
+def splitLine(scene,O,E,LIM):
+    """docstring for splitLine"""
+    if vm.distance(O,E)>LIM:
+        M=vm.midPoint(O,E)
+        return splitLine(scene,O,M,LIM) + splitLine(scene,M,E,LIM)
+    else:
+        return [Line(scene,O,E)]
+
+def splitArrow(scene,O,E,LIM):
+    """docstring for splitLine"""
+    if vm.distance(O,E)>LIM:
+        M=vm.midPoint(O,E)
+        return splitLine(scene,O,M,LIM) + splitArrow(scene,M,E,LIM)
+    else:
+        return [Arrow(scene,O,E)]
+
+class Picture(object):
+    """docstring for Picture"""
+    def __init__(self, data, bBox=False,
+        scaleTo=5, axes=False, boxed=False,
+        ViewPoint=(1.3,2.4,2), LightSource=(2,0,2),
+        nodes=[]
+    ):
+        super(Picture, self).__init__()
+        # Save or guess some raw data.
+        self.data = data
+        self.bBox = bBox
+        if not self.bBox:
+            self.bBox=guessBoundingBox(self.data)
+        self.axes=axes
+        self.boxed=boxed
+        self.scaleTo=scaleTo
+        self.nodes=nodes
+        self.xmin, self.ymin, self.zmin=self.bBox[0]
+        self.xmax, self.ymax, self.zmax=self.bBox[1]
+        # Compute things
+        self.centerPoint=vm.midPoint(*self.bBox)
+        self.maxCoord=max(vm.vector(self.bBox[0], self.bBox[1]))
+        # Convert relative coordinates to space x y z coordinates
+        self.coordinateChange=lambda l: [self.centerPoint[i]+l[i]*self.maxCoord for i in (0,1,2)]
+        self.viewPoint=self.coordinateChange(ViewPoint)
+        self.lightSource=self.coordinateChange(LightSource)
+        # Create the scene with the important data
+        self.scene=Scene(self.centerPoint,
+            self.viewPoint,
+            self.lightSource)
+        # Render data
+        self.polygons=[Polygon(L,self.scene) for L in data]
+
+    def render(self):
+        """docstring for render"""
+
+        LineLimit=self.maxCoord/60.
+
+        if self.axes:
+            self.polygons.extend( splitArrow(self.scene, (self.xmin,0,0),(self.xmax,0,0),LineLimit) )
+            self.polygons.extend( splitArrow(self.scene, (0,self.ymin,0),(0,self.ymax,0),LineLimit) )
+            self.polygons.extend( splitArrow(self.scene, (0,0,self.zmin),(0,0,self.zmax),LineLimit) )
+        if self.boxed:
+            P=[[self.xmin,self.ymin,self.zmin], [self.xmax,self.ymin,self.zmin], [self.xmax,self.ymax,self.zmin], [self.xmin,self.ymax,self.zmin], [self.xmin,self.ymin,self.zmax], [self.xmax,self.ymin,self.zmax], [self.xmax,self.ymax,self.zmax], [self.xmin,self.ymax,self.zmax]]
+            self.polygons.extend(splitLine(self.scene, P[0],P[1], LineLimit))
+            self.polygons.extend(splitLine(self.scene, P[1],P[2], LineLimit))
+            self.polygons.extend(splitLine(self.scene, P[2],P[3], LineLimit))
+            self.polygons.extend(splitLine(self.scene, P[0],P[3], LineLimit))
+            self.polygons.extend(splitLine(self.scene, P[4],P[5], LineLimit))
+            self.polygons.extend(splitLine(self.scene, P[5],P[6], LineLimit))
+            self.polygons.extend(splitLine(self.scene, P[6],P[7], LineLimit))
+            self.polygons.extend(splitLine(self.scene, P[4],P[7], LineLimit))
+            self.polygons.extend(splitLine(self.scene, P[0],P[4], LineLimit))
+            self.polygons.extend(splitLine(self.scene, P[1],P[5], LineLimit))
+            self.polygons.extend(splitLine(self.scene, P[2],P[6], LineLimit))
+            self.polygons.extend(splitLine(self.scene, P[3],P[7], LineLimit))
+
+        # sort
+        self.polygons.sort(key=attrgetter('depth'))
+
+
+
+        f=attrgetter("xmin","xmax")
+        #This is inefficient!
+        mM=[f(P) for P in self.polygons]
+        m,M=zip(*mM); m=min(m); M=max(M)
+        # end of inefficiency
+
+
+
+        preamble(scale=self.scaleTo/(M-m))
+        # print("\\begin{scope}[overlay]")
+        print("\\begin{pgfonlayer}{textLayer}")
+        #for N in self.nodes:
+        #   print Node(N,self.scene)
+        print("\n".join([str(Node(N, self.scene)) for N in self.nodes]))
+        print("\\end{pgfonlayer}")
+        # print("\\end{scope}")
+
+        #print("\\begin{scope}[transparency group, opacity=.5]")
+        #for P in self.polygons:
+        #   print(P)
+        print("\n".join([str(P) for P in self.polygons]))
+        #print("\\end{scope}")
+        postamble()
+
+
+def flatten(l):
+    """docstring for flatten"""
+    return [item for sublist in l for item in sublist]
+
+def guessBoundingBox(data):
+    """docstring for guessBoundingBox"""
+    x,y,z=zip(*flatten(data))
+    return ((min(x),min(y),min(z)),(max(x),max(y),max(z)))
+
+def mmaRescale(x):
+    """docstring for mmaRescale"""
+    c=vm.barycenter(x)
+    return [ [ c_i+1.07*(x_i-c_i) for (x_i,c_i) in zip(P,c)] for P in x]
+
+
+if __name__ == '__main__':
+    import argparse
+
+    description=('Transforms the list of faces in a a SAGE 3D graphic into a'
+        '\nstandalone+tizpicture LaTeX document. Note that the LaTeX document '
+        'should\nbe compiled with lualatex, as it can need huge amounts of memory.')
+
+    epilog=u"""Here's an example of the expected input:
+     P=implicit_plot3d(x**2+y**4*z**3==0,(x,-2,2), (y,-2,2),(z,-2,2))
+     P.triangulate()
+     Picture(P.face_list(), boxed=True, axes=False,).render()
+    """
+
+    argparser=argparse.ArgumentParser(description=description, epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,)
+
+    argparser.add_argument('--file', help="file to read (defaults to stdin)",
+        dest='file_input', default=None)
+
+    file_input=argparser.parse_args().file_input
+
+    if file_input:
+        fi=open(file_input, 'r')
+    else:
+        fi=sys.stdin
+
+    lines=fi.readlines()
+    inputScript="".join(lines)
+
+    def echoScript():
+        return "%"+"%".join(lines)
+
+    print echoScript()
+
+    # Init some vars.
+    x,y,z,u,v,t,a,b,c,m,n=var("x,y,z,u,v,t,a,b,c,m,n")
+
+    if inputScript:
+        exec(inputScript)
