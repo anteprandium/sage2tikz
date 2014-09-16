@@ -8,13 +8,16 @@ from math import sqrt, pow, fabs, copysign, exp
 from operator import attrgetter
 
 
+
 def linearRescale(a,b,   c,d):
-    """Return a lambda that rescales the interval [a,b] to [c,d]. The scaling is linear."""
+    """This function returns a lambda that rescales the interval [a,b] to [c,d]. The scaling is linear."""
     c1=(d*a - b*c)/float(a - b)
     c2=-(d - c)/float(a - b)
     return lambda x: round(c1+c2*x)
 
-def bernstein(y, t):     # Stolen from Bill Casselmans' pyscript
+    
+# Stolen from Bill Casselmans' pyscript
+def bernstein(y, t):
     n = len(y)-1
     t = 1.0*t
     s = 1-t
@@ -27,8 +30,11 @@ def bernstein(y, t):     # Stolen from Bill Casselmans' pyscript
         k = k+1
     return(p)
 
+
+
 class VectorMath(object):
     """This class encapsulates the vector functions. Vectors are taken to be lists or tuples of equal length."""
+    
     def __init__(self):
         pass
     def dotProduct(self, u,v):
@@ -70,13 +76,15 @@ vm=VectorMath()
 
 class Scene(object):
     """Scene class encapsulates all data pertaining to transforms from raw data to canvas"""
-    def __init__(self, centerPoint, viewPoint, lightSource):
+    def __init__(self, centerPoint, viewPoint, lightSource, lighting, lightModel):
         super(Scene, self).__init__()
         self.centerPoint = centerPoint
         self.viewPoint = viewPoint
         self.lightSource = lightSource
+        self.lightModel=lightModel
+        self._lighting=[Light(l) for l in lighting]
         # For white light model:
-        self.lightRescaling=linearRescale(0,1,100,10) #100=FullColor; 0=PureWhite.
+        self.lightRescaling=linearRescale(0,1,100,0) #100=FullColor; 0=PureWhite.
         # Cos=1->Angle=0->Full White Cos=0->Angle=pi/2->FullColor
         self.lightIntensity=lambda N, P: self.lightRescaling(
              bernstein([0.1,0.3, 0.5,0.8,0.9,1],abs(vm.cosine(  N,
@@ -88,41 +96,96 @@ class Scene(object):
                 +self.Displacement[1]*self.Displacement[1]))
         self.s1=self.Displacement[0]/self.r1 #->float
         self.c1=self.Displacement[1]/self.r1 #->float
-        self.RotatedDisplacement=(self.c1*self.Displacement[0]-
-                self.s1*self.Displacement[1],
-            self.s1*self.Displacement[0]+self.c1*self.Displacement[1],
-            self.Displacement[2])
+        self.RotatedDisplacement=(self.c1*self.Displacement[0]-self.s1*self.Displacement[1], 
+            self.s1*self.Displacement[0]+self.c1*self.Displacement[1], self.Displacement[2])
+        #self.r2=sqrt(pow(self.Displacement[0],2)+ pow(self.Displacement[1],2)+
+        # pow(self.Displacement[2],2))
         self.r2=float(sqrt(self.Displacement[0]*self.Displacement[0]
             +self.Displacement[1]*self.Displacement[1]
             +self.Displacement[2]*self.Displacement[2]))
         self.c2=self.RotatedDisplacement[1]/self.r2 # ->float
         self.s2=self.RotatedDisplacement[2]/self.r2 # ->float
-
+        
     def planeProjection(self, P):
         """planeProjection takes a 3D point, and does the following:
         1. It translates the view point to the origin
         2. It applies two rotations, first around the z-axis, then around the x axis
             so that the centerpoint of the view lies on the y axis.
-        It we wanted to do parallell projection, we can apply this plane projection and
+        It we wanted to do parallell projection, we can apply this plane projection and 
         simply drop the y coordinate.
         """
-        return (self.c1*(P[0]-self.viewPoint[0])-self.s1*(P[1]-self.viewPoint[1]),
-            self.s1*self.c2*(P[0]-self.viewPoint[0]) +self.c1*self.c2*(P[1]-self.viewPoint[1]) +
+        return (self.c1*(P[0]-self.viewPoint[0])-self.s1*(P[1]-self.viewPoint[1]), 
+            self.s1*self.c2*(P[0]-self.viewPoint[0]) +self.c1*self.c2*(P[1]-self.viewPoint[1]) + 
             self.s2*(P[2]-self.viewPoint[2]),
         -self.s1*self.s2*(P[0]-self.viewPoint[0])-self.c1*self.s2*(P[1]-self.viewPoint[1]) +
             self.c2*(P[2]-self.viewPoint[2]))
-
+    
     def canvasProjection(self, M):
         """This converts a point, already in parallell projection, to a perspective 2d point.
         The transformation is just dividing by the y coordinate to some power. This means, the further away from the viewpoint, the smaller. 1.2 Seems to be the right amount.
         """
         t=M[1]**(1.2)
         return( ( M[0]/t, M[2]/t ) )
-        
+
+    def lighting(self, Point, Normal):
+        """docstring for lighting"""
+        c=(0,0,0) # Start with black
+        colors=[light.shineOn(Point,Normal) for light in self._lighting]
+        #print "%% colors=", colors 
+        # c=[sum(l) for l in zip(*colors)]
+        return reduce(mixRGB,colors)
+
+def mixRGB(c1,c2):
+    return vm.scalarProduct(.9, vm.kSum(c1,c2))
+
 
 def strPoint(P):
     """docstring for strPoint"""
     return("(%.6f,%.6f)" % (P[0],P[1]))
+
+class _Light(object):
+    """docstring for Light"""
+    def __init__(self, description):
+        # super(Light, self).__init__()
+        self.description = description
+        self.type= description["Type"]
+        self.color= description["Color"]
+
+class PointLight(_Light):
+    """docstring for PointLight"""
+    def __init__(self, description):
+        super(PointLight, self).__init__(description)
+        self.position=description["Position"]
+        #print "%% Position: ", self.position
+    def shineOn(self, Point, Normal):
+        """docstring for shineOn"""
+        absCosine=abs(vm.cosine(Normal, vm.vector(Point,self.position)))
+        return vm.scalarProduct(absCosine,self.color)
+    def __str__(self):
+        """docstring for __str__"""
+        return("<Type %s, Color=%s, Position=%s>" % 
+            (self.type, str(self.color), str(self.position)))
+
+class AmbientLight(_Light):
+    """docstring for AmbientLight"""
+    def __init__(self, description):
+        super(AmbientLight, self).__init__(description)
+    def shineOn(self, Point, Normal):
+        """docstring for shineOn"""
+        return self.color
+    def __str__(self):
+        """docstring for __str__"""
+        return("<Type %s, Color=%s>" % 
+            (self.type, str(self.color)))   
+
+def Light(lDict):
+    """see the pun? see the pun? :)"""
+    lObj= {"Ambient": AmbientLight, 
+        "Point": PointLight}[ lDict["Type"] ](lDict)
+    return lObj
+    
+    
+
 
 
 class Polygon(object):
@@ -139,17 +202,20 @@ class Polygon(object):
         self.xmin=min([P[0] for P in self.canvasPolygon])
         self.xmax=max([P[0] for P in self.canvasPolygon])
         self.lightIntensity=scene.lightIntensity(self.normalVector,self.lPoints[0])
-        self.orientation=copysign(1,vm.cosine(self.normalVector,
+        self.orientation=copysign(1,vm.cosine(self.normalVector, 
             vm.vector(self.lPoints[0], scene.viewPoint)))
         self.depth=-vm.barycenter(self.projectedPolygon)[1]
-
+        self.finalColor=scene.lighting(self.lPoints[0],self.normalVector)
+        
     def __repr__(self): # this belongs in a self.render() method
-
-        if self.orientation>0:
-            return "\\filldraw[fColor=%d] %s--cycle;" %( self.lightIntensity,
-                "--".join([strPoint(P) for P in self.canvasPolygon]) )
+        if self.scene.lightModel=="White":
+                if self.orientation>0:
+                    return "\\filldraw[fColor=%d] %s--cycle;" %( self.lightIntensity, "--".join([strPoint(P) for P in self.canvasPolygon]) )
+                else:
+                    return "\\filldraw[bColor=%d] %s--cycle;" %( self.lightIntensity, "--".join([strPoint(P) for P in self.canvasPolygon]) )
         else:
-            return "\\filldraw[bColor=%d] %s--cycle;" %( self.lightIntensity,
+            return "\\filldraw[setcolor={%.3f,%.3f,%.3f},usecolor] %s--cycle;" % (
+                self.finalColor[0], self.finalColor[1], self.finalColor[2], 
                 "--".join([strPoint(P) for P in self.canvasPolygon]) )
 
 class Node(object):
@@ -173,7 +239,7 @@ def echoScript():
 
 def preamble(scale=10):
     """Document Preamble"""
-    print """%!TEX TS-program = lualatex
+    print """%!TEX TS-program = lualatex 
 %% Lovingly handcrafted with texrender3d.py, a SAGE/Python script that renders
 %% polygons into a standalone+tikzpicture document.
 %%
@@ -198,10 +264,10 @@ def preamble(scale=10):
 \\begin{tikzpicture}[scale=%.3f, line cap=round, line width=.1pt, line join=round, line cap=round]""" % scale
 
 def postamble():
-    """docstring for postamble"""
+    """docstring for postamble"""   
     print "\\end{tikzpicture}\n\\end{document}",
 
-
+        
 class Line(Polygon):
     """the normal vector will fail for Line; hence lightIntensity and orientation will be rubbish. BUT: we are not using either for __repr__, so we can call it a day! """
     def __init__(self, scene, Origin, End):
@@ -210,15 +276,15 @@ class Line(Polygon):
     def __repr__(self):
         """docstring for __repr__"""
         return "\\draw[%s] %s--%s;" % (self.Style, strPoint(self.canvasPolygon[0]), strPoint(self.canvasPolygon[1]))
-
-
-
+        
+        
+        
 class Arrow(Line):
     """docstring for TikZArrow"""
     def __init__(self, scene, Origin,End):
         super(Arrow, self).__init__(scene, Origin,End)
         self.Style="->,mmaAxes"
-
+        
 
 def splitLine(scene,O,E,LIM):
     """docstring for splitLine"""
@@ -228,6 +294,7 @@ def splitLine(scene,O,E,LIM):
     else:
         return [Line(scene,O,E)]
 
+
 def splitArrow(scene,O,E,LIM):
     """docstring for splitLine"""
     if vm.distance(O,E)>LIM:
@@ -236,16 +303,22 @@ def splitArrow(scene,O,E,LIM):
     else:
         return [Arrow(scene,O,E)]
 
+
 class Picture(object):
     """docstring for Picture"""
-    def __init__(self, data, bBox=False,
-        scaleTo=5, axes=False, boxed=False,
-        ViewPoint=(1.3,2.4,2), LightSource=(2,0,2),
+    def __init__(self, data, bBox=False, 
+        scaleTo=5, axes=False, boxed=False, 
+        lightModel="White", ViewPoint=(1.3,2.4,2), LightSource=(2,0,2),
+        lighting=({"Type": "Ambient", "Color": (.3,.2,.4)},
+            {"Type": "Point", "Color": (.8,0,0), "Position": (2,0,2)},
+            {"Type": "Point", "Color": (0,0,.8), "Position": (0,-2,2)},
+            {"Type": "Point", "Color": (.4,.8,0), "Position": (-1,-1,2)}),
         nodes=[]
     ):
         super(Picture, self).__init__()
         # Save or guess some raw data.
         self.data = data
+        self.lightModel=lightModel
         self.bBox = bBox
         if not self.bBox:
             self.bBox=guessBoundingBox(self.data)
@@ -262,18 +335,24 @@ class Picture(object):
         self.coordinateChange=lambda l: [self.centerPoint[i]+l[i]*self.maxCoord for i in (0,1,2)]
         self.viewPoint=self.coordinateChange(ViewPoint)
         self.lightSource=self.coordinateChange(LightSource)
-        # Create the scene with the important data
-        self.scene=Scene(self.centerPoint,
-            self.viewPoint,
-            self.lightSource)
+        self.lighting=[light.copy() for light in lighting]
+        for l in self.lighting:
+            if "Position" in l.keys():
+                l["Position"]=self.coordinateChange(l["Position"])
+        # Create the scene with all important data
+        self.scene=Scene( self.centerPoint, 
+            self.viewPoint, 
+            self.lightSource , 
+            self.lighting, 
+            self.lightModel)
         # Render data
         self.polygons=[Polygon(L,self.scene) for L in data]
-
+        
     def render(self):
         """docstring for render"""
-
+            
         LineLimit=self.maxCoord/60.
-
+        
         if self.axes:
             self.polygons.extend( splitArrow(self.scene, (self.xmin,0,0),(self.xmax,0,0),LineLimit) )
             self.polygons.extend( splitArrow(self.scene, (0,self.ymin,0),(0,self.ymax,0),LineLimit) )
@@ -292,20 +371,20 @@ class Picture(object):
             self.polygons.extend(splitLine(self.scene, P[1],P[5], LineLimit))
             self.polygons.extend(splitLine(self.scene, P[2],P[6], LineLimit))
             self.polygons.extend(splitLine(self.scene, P[3],P[7], LineLimit))
-
+            
         # sort
         self.polygons.sort(key=attrgetter('depth'))
-
-
-
+        
+        
+            
         f=attrgetter("xmin","xmax")
         #This is inefficient!
         mM=[f(P) for P in self.polygons]
         m,M=zip(*mM); m=min(m); M=max(M)
         # end of inefficiency
-
-
-
+            
+            
+            
         preamble(scale=self.scaleTo/(M-m))
         # print("\\begin{scope}[overlay]")
         print("\\begin{pgfonlayer}{textLayer}")
@@ -314,14 +393,14 @@ class Picture(object):
         print("\n".join([str(Node(N, self.scene)) for N in self.nodes]))
         print("\\end{pgfonlayer}")
         # print("\\end{scope}")
-
+        
         #print("\\begin{scope}[transparency group, opacity=.5]")
         #for P in self.polygons:
         #   print(P)
         print("\n".join([str(P) for P in self.polygons]))
         #print("\\end{scope}")
         postamble()
-
+        
 
 def flatten(l):
     """docstring for flatten"""
@@ -336,44 +415,58 @@ def mmaRescale(x):
     """docstring for mmaRescale"""
     c=vm.barycenter(x)
     return [ [ c_i+1.07*(x_i-c_i) for (x_i,c_i) in zip(P,c)] for P in x]
+    
+
+
+
+#from bigdata import data
+#data=map(mmaRescale,data)
+# Picture(data, lighting=[
+#   nodes=[{"Position": (0,0,0), "Text": "Origin", "Options": "inner sep=0pt"}],
+#   {"Type": "Ambient", "Color": (168./255.,0,61./255.)},
+#   # {"Type": "Point", "Color": (.4,.2,.2), "Position": (2,0,2)},
+#   # {"Type": "Point", "Color": (.2,.4,.2), "Position": (0,-2,2)},
+#   # {"Type": "Point", "Color": (.2,.2,.4), "Position": (2,-2,2)}
+#   {"Type": "Point", "Color": (.5,.5,.5), "Position": (2,-2,2)}
+# ]).render()
+
+
+
+
+
 
 
 if __name__ == '__main__':
     import argparse
-
-    description=('Transforms the list of faces in a a SAGE 3D graphic into a'
-        '\nstandalone+tizpicture LaTeX document. Note that the LaTeX document '
-        'should\nbe compiled with lualatex, as it can need huge amounts of memory.')
-
-    epilog=u"""Here's an example of the expected input:
-     P=implicit_plot3d(x**2+y**4*z**3==0,(x,-2,2), (y,-2,2),(z,-2,2))
-     P.triangulate()
-     Picture(P.face_list(), boxed=True, axes=False,).render()
-    """
-
-    argparser=argparse.ArgumentParser(description=description, epilog=epilog,
-        formatter_class=argparse.RawDescriptionHelpFormatter,)
-
+    
+    
+    argparser=argparse.ArgumentParser(description=u'Transforms the list of faces in a a SAGE 3D graphic into a standalone+tizpicture LaTeX document.\nNote that the LaTeX document should be compiled with lualatex, as it can need huge amounts of memory.')
     argparser.add_argument('--file', help="file to read (defaults to stdin)",
         dest='file_input', default=None)
-
+    
     file_input=argparser.parse_args().file_input
-
+    
     if file_input:
         fi=open(file_input, 'r')
     else:
         fi=sys.stdin
-
+        
     lines=fi.readlines()
     inputScript="".join(lines)
-
+    
     def echoScript():
         return "%"+"%".join(lines)
-
-    print echoScript()
-
+    
     # Init some vars.
     x,y,z,u,v,t,a,b,c,m,n=var("x,y,z,u,v,t,a,b,c,m,n")
 
     if inputScript:
         exec(inputScript)
+
+
+
+## Example of input:
+# P=implicit_plot3d(x**2+y**4*z**3==0,(x,-2,2), (y,-2,2),(z,-2,2))
+# P.triangulate()
+# Picture(P.face_list(), boxed=True, axes=False,).render()
+ 
