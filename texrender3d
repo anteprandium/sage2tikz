@@ -178,7 +178,8 @@ def preamble(scale=10):
 %% polygons into a standalone+tikzpicture document.
 %%
 %% The input script was:
-""" + echoScript() + """\\documentclass[border=1pt]{standalone}
+""" + echoScript() + """
+\\documentclass[border=1pt]{standalone}
 \\nofiles
 \\usepackage[]{tikz}
 \\providecolor{Back}{RGB}{250,183,0}
