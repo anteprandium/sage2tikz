@@ -54,7 +54,7 @@ Python:
     
 Result:
 
-![Result Contour.Pdf](examples/result_contour.pdf.png)
+![Result Contour.Pdf](examples/result_pseudo.pdf.png)
 
 See the Examples folder.
 
