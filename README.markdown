@@ -50,7 +50,7 @@ Python:
         nodes=[{"Position": (0,0,2.501), "Text": "$\\uparrow$\\rlap{ to infinity}", "Options": "anchor=south"},
         {"Position": (0,0,-2.501), "Text": "$\\downarrow$\\rlap{ to infinity}", "Options": "anchor=north"},
         ]
-    ).ren
+    ).render()
     
 Result:
 
