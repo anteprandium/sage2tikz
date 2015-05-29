@@ -371,7 +371,7 @@ if __name__ == '__main__':
     def echoScript():
         return "%"+"%".join(lines)
 
-    print echoScript()
+    # print echoScript()
 
     # Init some vars.
     x,y,z,u,v,t,a,b,c,m,n=var("x,y,z,u,v,t,a,b,c,m,n")
